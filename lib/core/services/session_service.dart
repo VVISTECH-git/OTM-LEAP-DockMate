@@ -1,15 +1,19 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../constants/app_constants.dart';
 
 /// Single source of truth for the current user session.
-/// No saved credentials — user must login every time.
+/// Auth token is stored in encrypted secure storage (Android Keystore).
+/// Non-sensitive preferences remain in SharedPreferences.
 class SessionService {
   SessionService._();
   static final SessionService instance = SessionService._();
 
   SharedPreferences? _prefs;
+  final _secure = const FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  );
 
   Future<SharedPreferences> get _p async {
     _prefs ??= await SharedPreferences.getInstance();
@@ -23,13 +27,16 @@ class SessionService {
     required String authHeader,
     required String userId,
   }) async {
-    final p = await _p;
+    final p      = await _p;
     final parts  = userId.split('.');
     final domain = parts.isNotEmpty ? parts[0] : AppConstants.defaultDomain;
     final user   = parts.length > 1 ? parts.sublist(1).join('.') : userId;
 
+    // Auth token → encrypted Android Keystore
+    await _secure.write(key: AppConstants.prefAuthHeader, value: authHeader);
+
+    // Everything else → SharedPreferences (not sensitive)
     await p.setString(AppConstants.prefInstanceUrl, instanceUrl);
-    await p.setString(AppConstants.prefAuthHeader, authHeader);
     await p.setString(AppConstants.prefUserId, userId);
     await p.setString(AppConstants.prefUser, user);
     await p.setString(AppConstants.prefDomain, domain);
@@ -44,8 +51,9 @@ class SessionService {
       (await _p).getString(AppConstants.prefInstanceUrl) ??
       AppConstants.defaultInstanceUrl;
 
+  // Auth token read from encrypted secure storage
   Future<String> get authHeader async =>
-      (await _p).getString(AppConstants.prefAuthHeader) ?? '';
+      await _secure.read(key: AppConstants.prefAuthHeader) ?? '';
 
   Future<String> get domain async =>
       (await _p).getString(AppConstants.prefDomain) ??
@@ -65,13 +73,15 @@ class SessionService {
 
   // ─── Clear ────────────────────────────────────────────────────────────────
 
-  // FIX: Replaced .clear() (which wiped ALL SharedPreferences including 3rd-party libs)
-  // with explicit per-key removes so only this app's session keys are deleted.
   Future<void> clear() async {
     final p = await _p;
+
+    // Delete auth token from secure storage
+    await _secure.delete(key: AppConstants.prefAuthHeader);
+
+    // Remove everything else from SharedPreferences
     await Future.wait([
       p.remove(AppConstants.prefInstanceUrl),
-      p.remove(AppConstants.prefAuthHeader),
       p.remove(AppConstants.prefUserId),
       p.remove(AppConstants.prefUser),
       p.remove(AppConstants.prefDomain),

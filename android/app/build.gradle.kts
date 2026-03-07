@@ -30,27 +30,30 @@ android {
     defaultConfig {
         applicationId = "com.vvis.leapdockmate"
 
-        // FIX: Explicitly set minSdk to 21 instead of deferring to flutter.minSdkVersion.
-        // image_picker requires minSdk >= 21. If Flutter's default is lower, camera/gallery
-        // would fail silently at runtime on older devices.
-        minSdk = flutter.minSdkVersion
+        // minSdk 23 required for flutter_secure_storage EncryptedSharedPreferences
+        // and image_picker. flutter.minSdkVersion defaults to 21 which is too low.
+        minSdk = maxOf(flutter.minSdkVersion, 23)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
     signingConfigs {
-        create("release") {
-            keyAlias = keystoreProperties["keyAlias"] as String
-            keyPassword = keystoreProperties["keyPassword"] as String
-            storeFile = keystoreProperties["storeFile"]?.let { file(it) }
-            storePassword = keystoreProperties["storePassword"] as String
+        if (keystorePropertiesFile.exists()) {
+            create("release") {
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+                storeFile = keystoreProperties["storeFile"]?.let { file(it) }
+                storePassword = keystoreProperties["storePassword"] as String
+            }
         }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            if (keystorePropertiesFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 }

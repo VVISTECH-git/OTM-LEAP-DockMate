@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../core/constants/app_constants.dart';
@@ -32,6 +33,14 @@ class _LoginScreenState extends State<LoginScreen>
   String _userIdErrorMsg = 'Username is required';
   String _pwdErrorMsg    = 'Password is required';
 
+  // ─── Rate limiting ────────────────────────────────────────────────────────
+  static const int _maxAttempts   = 5;
+  static const int _lockoutSecs   = 30;
+  int    _failedAttempts   = 0;
+  bool   _isLockedOut      = false;
+  int    _lockoutCountdown = 0;
+  Timer? _lockoutTimer;
+
   late AnimationController _shakeCtrl;
   late AnimationController _fadeCtrl;
   late Animation<Offset>   _shakeAnim;
@@ -61,25 +70,66 @@ class _LoginScreenState extends State<LoginScreen>
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
   }
 
-  Future<void> _login() async {
+  void _startLockout() {
     setState(() {
-      _userIdError    = _userIdCtrl.text.trim().isEmpty;
-      _pwdError       = _passwordCtrl.text.trim().isEmpty;
+      _isLockedOut      = true;
+      _lockoutCountdown = _lockoutSecs;
+    });
+    _lockoutTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) { timer.cancel(); return; }
+      setState(() => _lockoutCountdown--);
+      if (_lockoutCountdown <= 0) {
+        timer.cancel();
+        // Clear password field and reset ALL state cleanly
+        _passwordCtrl.clear();
+        setState(() {
+          _isLockedOut     = false;
+          _failedAttempts  = 0;
+          _userIdError     = false;
+          _pwdError        = false;
+          _pwdErrorMsg     = 'Password is required';
+          _userIdErrorMsg  = 'Username is required';
+        });
+        // Focus password field so user can type immediately
+        FocusScope.of(context).requestFocus(_passwordFocus);
+      }
+    });
+  }
+
+  Future<void> _login() async {
+    // Block if locked out
+    if (_isLockedOut) return;
+
+    // Clear any stale errors before validating
+    setState(() {
+      _userIdError    = false;
+      _pwdError       = false;
       _userIdErrorMsg = 'Username is required';
       _pwdErrorMsg    = 'Password is required';
     });
-    if (_userIdError || _pwdError) {
+
+    final userIdEmpty = _userIdCtrl.text.trim().isEmpty;
+    final pwdEmpty    = _passwordCtrl.text.trim().isEmpty;
+
+    if (userIdEmpty || pwdEmpty) {
+      setState(() {
+        _userIdError = userIdEmpty;
+        _pwdError    = pwdEmpty;
+      });
       HapticFeedback.mediumImpact();
       _shakeCtrl.forward(from: 0);
       return;
     }
+
     setState(() => _loading = true);
+
     try {
       await AuthService.instance.login(
         instanceUrl: _instanceCtrl.text.trim(),
         userId:      _userIdCtrl.text.trim(),
         password:    _passwordCtrl.text.trim(),
       );
+      _failedAttempts = 0;
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         PageRouteBuilder(
@@ -91,19 +141,29 @@ class _LoginScreenState extends State<LoginScreen>
       );
     } catch (e) {
       if (!mounted) return;
+
+      _failedAttempts++;
+
       setState(() {
-        _loading     = false;
-        _userIdError = true;
-        _pwdError    = true;
-        _pwdErrorMsg = e.toString().replaceAll('Exception: ', '');
+        _loading        = false;
+        _userIdError    = true;
+        _pwdError       = true;
+        _pwdErrorMsg    = e.toString().replaceAll('Exception: ', '');
+        _userIdErrorMsg = '';
       });
+
       HapticFeedback.mediumImpact();
       _shakeCtrl.forward(from: 0);
+
+      if (_failedAttempts >= _maxAttempts) {
+        _startLockout();
+      }
     }
   }
 
   @override
   void dispose() {
+    _lockoutTimer?.cancel();
     _shakeCtrl.dispose();
     _fadeCtrl.dispose();
     _instanceCtrl.dispose();
@@ -155,7 +215,7 @@ class _LoginScreenState extends State<LoginScreen>
             color: AppConstants.nokiaBlue,
             boxShadow: [
               BoxShadow(
-                color: AppConstants.nokiaBlue.withOpacity(0.3),
+                color: AppConstants.nokiaBlue.withValues(alpha: 0.3),
                 blurRadius: 24,
                 offset: const Offset(0, 8),
               ),
@@ -287,14 +347,17 @@ class _LoginScreenState extends State<LoginScreen>
           width: double.infinity,
           height: 54,
           child: ElevatedButton(
-            onPressed: _loading ? null : _login,
+            onPressed: (_loading || _isLockedOut) ? null : _login,
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppConstants.nokiaBlue,
+              backgroundColor: _isLockedOut
+                  ? AppConstants.textGrey
+                  : AppConstants.nokiaBlue,
               foregroundColor: Colors.white,
-              disabledBackgroundColor:
-                  AppConstants.nokiaBlue.withOpacity(0.5),
+              disabledBackgroundColor: _isLockedOut
+                  ? AppConstants.textGrey
+                  : AppConstants.nokiaBlue.withValues(alpha: 0.5),
               elevation: 4,
-              shadowColor: AppConstants.nokiaBlue.withOpacity(0.4),
+              shadowColor: AppConstants.nokiaBlue.withValues(alpha: 0.4),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14)),
             ),
@@ -303,16 +366,47 @@ class _LoginScreenState extends State<LoginScreen>
                     width: 22, height: 22,
                     child: CircularProgressIndicator(
                         color: Colors.white, strokeWidth: 2.5))
-                : const Text(
-                    'Sign In',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.3,
-                    ),
-                  ),
+                : _isLockedOut
+                    ? Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.lock_outline_rounded,
+                              size: 16, color: Colors.white),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Try again in ${_lockoutCountdown}s',
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
+                      )
+                    : const Text(
+                        'Sign In',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
           ),
         ),
+        // Attempts warning
+        if (_failedAttempts > 0 && !_isLockedOut)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Text(
+              '${_maxAttempts - _failedAttempts} attempt${(_maxAttempts - _failedAttempts) != 1 ? 's' : ''} remaining before lockout',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 11,
+                color: AppConstants.errorRed,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -352,7 +446,7 @@ class _InputField extends StatelessWidget {
   Color get _borderColor {
     if (hasError) return AppConstants.errorRed;
     if (isFocused) return AppConstants.nokiaBlue;
-    return const Color(0xFFCBD5E1); // darker than before — not disabled-looking
+    return const Color(0xFFCBD5E1);
   }
 
   Color get _iconColor {
@@ -376,7 +470,7 @@ class _InputField extends StatelessWidget {
             boxShadow: isFocused
                 ? [
                     BoxShadow(
-                      color: AppConstants.nokiaBlue.withOpacity(0.08),
+                      color: AppConstants.nokiaBlue.withValues(alpha: 0.08),
                       blurRadius: 8,
                       offset: const Offset(0, 2),
                     )
@@ -406,7 +500,7 @@ class _InputField extends StatelessWidget {
                 fontSize: 14,
               ),
               hintStyle: TextStyle(
-                color: AppConstants.textGrey.withOpacity(0.5),
+                color: AppConstants.textGrey.withValues(alpha: 0.5),
               ),
               prefixIcon: Icon(icon, color: _iconColor, size: 20),
               suffixIcon: suffixIcon,
@@ -417,7 +511,7 @@ class _InputField extends StatelessWidget {
             ),
           ),
         ),
-        if (hasError && errorText != null)
+        if (hasError && errorText != null && errorText!.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 5, left: 4),
             child: Text(errorText!,

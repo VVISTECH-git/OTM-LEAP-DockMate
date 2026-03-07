@@ -1,6 +1,6 @@
-name: freightpro
-description: FreightPro - Oracle Transportation Management Mobile App
-version: 2.0.0+1
+name: leap_dockmate
+description: LEAP - Dockmate
+version: 2.0.1+2
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -12,6 +12,7 @@ dependencies:
   # HTTP & Auth
   http: ^1.2.0
   shared_preferences: ^2.2.3
+  flutter_secure_storage: ^9.2.2
 
   # Image picking
   image_picker: ^1.1.2

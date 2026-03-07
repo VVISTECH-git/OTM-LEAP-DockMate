@@ -5,11 +5,11 @@ import 'core/constants/app_constants.dart';
 import 'features/auth/screens/splash_screen.dart';
 import 'features/shipment_groups/providers/shipment_groups_provider.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Lock to portrait — same as typical warehouse app usage
-  SystemChrome.setPreferredOrientations([
+  await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);

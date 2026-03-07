@@ -35,7 +35,14 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _checkSession() async {
-    final isLoggedIn = await SessionService.instance.isLoggedIn;
+    bool isLoggedIn = false;
+    try {
+      isLoggedIn = await SessionService.instance.isLoggedIn;
+    } catch (_) {
+      // If secure storage fails (e.g. first launch, corrupted keys),
+      // treat as logged out and clear any stale data.
+      try { await SessionService.instance.clear(); } catch (_) {}
+    }
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
@@ -72,7 +79,7 @@ class _SplashScreenState extends State<SplashScreen>
                   height: 110,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: Colors.white.withOpacity(0.1),
+                    color: Colors.white.withValues(alpha: 0.1),
                   ),
                   child: Center(
                     child: Container(
@@ -115,7 +122,7 @@ class _SplashScreenState extends State<SplashScreen>
                 SizedBox(
                   width: 120,
                   child: LinearProgressIndicator(
-                    backgroundColor: Colors.white.withOpacity(0.15),
+                    backgroundColor: Colors.white.withValues(alpha: 0.15),
                     valueColor:
                         const AlwaysStoppedAnimation<Color>(Colors.white),
                     minHeight: 2,

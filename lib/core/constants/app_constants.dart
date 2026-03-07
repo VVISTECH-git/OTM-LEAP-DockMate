@@ -27,7 +27,7 @@ class AppConstants {
       '/logisticsRestApi/resources-int/v2/documents';
 
   // ─── Document Upload ──────────────────────────────────────────────────────
-  static const int maxDocuments = 5;
+  static const int maxDocuments = 20;  // ← changed from 5 to 20
   static const int imageQuality = 85;
   static const int imageMaxWidth = 1920;
   static const int imageMaxHeight = 1080;
