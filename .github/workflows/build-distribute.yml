@@ -1,0 +1,125 @@
+name: LEAP DockMate — Build & Distribute
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  FLUTTER_VERSION: '3.24.0'
+  APP_NAME: 'LEAP-DockMate'
+  PACKAGE_NAME: 'com.vvis.leapdockmate'
+
+jobs:
+  build-and-distribute:
+    name: Build, Sign & Distribute
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Decode keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/leap-release.jks
+
+      - name: Set build version
+        id: version
+        run: |
+          VERSION=$(grep 'version:' pubspec.yaml | sed 's/version: //' | tr -d ' \r')
+          BUILD_NUM=${{ github.run_number }}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "build_num=${BUILD_NUM}" >> $GITHUB_OUTPUT
+          echo "filename=${{ env.APP_NAME }}-v${VERSION}-build${BUILD_NUM}" >> $GITHUB_OUTPUT
+
+      - name: Build release APK
+        env:
+          KEYSTORE_PATH: leap-release.jks
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+        run: |
+          flutter build apk --release \
+            --build-name=${{ steps.version.outputs.version }} \
+            --build-number=${{ steps.version.outputs.build_num }}
+
+      - name: Build release AAB
+        env:
+          KEYSTORE_PATH: leap-release.jks
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+        run: |
+          flutter build appbundle --release \
+            --build-name=${{ steps.version.outputs.version }} \
+            --build-number=${{ steps.version.outputs.build_num }}
+
+      - name: Rename build artifacts
+        run: |
+          mv build/app/outputs/flutter-apk/app-release.apk \
+             build/app/outputs/flutter-apk/${{ steps.version.outputs.filename }}.apk
+          mv build/app/outputs/bundle/release/app-release.aab \
+             build/app/outputs/bundle/release/${{ steps.version.outputs.filename }}.aab
+
+      - name: Upload APK to Google Drive
+        uses: willo32/google-drive-upload-action@v1
+        with:
+          target: build/app/outputs/flutter-apk/${{ steps.version.outputs.filename }}.apk
+          credentials: ${{ secrets.GDRIVE_CREDENTIALS }}
+          parent_folder_id: ${{ secrets.GDRIVE_DOCKMATE_FOLDER_ID }}
+          name: ${{ steps.version.outputs.filename }}.apk
+          overwrite: false
+
+      # Play Store upload — enable once PLAY_STORE_JSON_KEY secret is added
+      # - name: Upload AAB to Play Store
+      #   uses: r0adkll/upload-google-play@v1
+      #   with:
+      #     serviceAccountJsonPlainText: ${{ secrets.PLAY_STORE_JSON_KEY }}
+      #     packageName: ${{ env.PACKAGE_NAME }}
+      #     releaseFiles: build/app/outputs/bundle/release/${{ steps.version.outputs.filename }}.aab
+      #     track: internal
+      #     status: completed
+      #     whatsNewDirectory: distribution/whatsnew
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}-build${{ steps.version.outputs.build_num }}
+          name: "${{ env.APP_NAME }} v${{ steps.version.outputs.version }} (build ${{ steps.version.outputs.build_num }})"
+          body: |
+            ## LEAP DockMate — v${{ steps.version.outputs.version }}
+
+            **Build:** ${{ steps.version.outputs.build_num }}
+            **Triggered by:** ${{ github.actor }}
+            **Commit:** ${{ github.sha }}
+
+            ### Distribution
+            - APK uploaded to Google Drive (team testing)
+            - Play Store submission pending
+          files: |
+            build/app/outputs/flutter-apk/${{ steps.version.outputs.filename }}.apk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Remove keystore
+        if: always()
+        run: rm -f android/app/leap-release.jks
