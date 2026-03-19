@@ -4,7 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
 import '../../../core/theme/leap_theme.dart';
-import '../../../core/providers/locale_provider.dart';
 import '../../../core/services/otm_instance_service.dart';
 import '../services/auth_service.dart';
 import '../../shipment_groups/screens/shipment_groups_screen.dart';
@@ -161,18 +160,6 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  void _showLanguagePicker(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => ChangeNotifierProvider.value(
-        value: context.read<LocaleProvider>(),
-        child: const _LanguagePickerSheet(),
-      ),
-    );
-  }
-
   void _openInstancePicker() {
     showModalBottomSheet(
       context: context,
@@ -211,72 +198,52 @@ class _LoginScreenState extends State<LoginScreen>
             top: MediaQuery.of(context).padding.top + 24,
             bottom: 28, left: 20, right: 20,
           ),
-          child: Stack(alignment: Alignment.center, children: [
-            Positioned(
-              bottom: 0, right: 0,
+          child: Column(children: [
+            const Text('LEAP',
+              style: TextStyle(fontFamily: 'PlusJakartaSans',
+                fontSize: 40, fontWeight: FontWeight.w800,
+                color: Colors.white, letterSpacing: 8, height: 1.0)),
+            const SizedBox(height: 5),
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              Container(width: 22, height: 1.5, color: t.accent),
+              const SizedBox(width: 8),
+              Text('DOCKMATE', style: TextStyle(fontFamily: 'PlusJakartaSans',
+                  fontSize: 11, fontWeight: FontWeight.w700,
+                  color: t.accent, letterSpacing: 5)),
+              const SizedBox(width: 8),
+              Container(width: 22, height: 1.5, color: t.accent),
+            ]),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(100),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+                color: Colors.white.withValues(alpha: 0.06),
+              ),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                // Language picker
-                IconButton(
-                  icon: Container(
-                    width: 34, height: 34,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.10),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Icon(Icons.language_outlined,
-                        color: Colors.white, size: 18),
-                  ),
-                  onPressed: () => _showLanguagePicker(context),
-                ),
-                // Theme picker
-                IconButton(
-                  icon: Container(
-                    width: 34, height: 34,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.10),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Icon(Icons.palette_outlined,
-                        color: Colors.white, size: 18),
-                  ),
-                  onPressed: () => LeapThemePicker.show(context),
-                ),
+                Container(width: 6, height: 6,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle, color: LeapPlatform.oracleOrange)),
+                const SizedBox(width: 7),
+                Text('Powered by Oracle OTM',
+                  style: TextStyle(fontFamily: 'PlusJakartaSans',
+                    fontSize: 10, fontWeight: FontWeight.w600,
+                    color: Colors.white.withValues(alpha: 0.50),
+                    letterSpacing: 0.3)),
               ]),
             ),
-            Column(children: [
-              const Text('LEAP',
-                style: TextStyle(fontFamily: 'PlusJakartaSans',
-                  fontSize: 40, fontWeight: FontWeight.w800,
-                  color: Colors.white, letterSpacing: 8, height: 1.0)),
-              const SizedBox(height: 5),
-              Row(mainAxisSize: MainAxisSize.min, children: [
-                Container(width: 22, height: 1.5, color: t.accent),
-                const SizedBox(width: 8),
-                Text('DOCKMATE', style: TextStyle(fontFamily: 'PlusJakartaSans',
-                    fontSize: 11, fontWeight: FontWeight.w700,
-                    color: t.accent, letterSpacing: 5)),
-                const SizedBox(width: 8),
-                Container(width: 22, height: 1.5, color: t.accent),
-              ]),
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(100),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-                  color: Colors.white.withValues(alpha: 0.06),
-                ),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Container(width: 6, height: 6,
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle, color: LeapPlatform.oracleOrange)),
-                  const SizedBox(width: 7),
-                  Text('Powered by Oracle OTM',
-                    style: TextStyle(fontFamily: 'PlusJakartaSans',
-                      fontSize: 10, fontWeight: FontWeight.w600,
-                      color: Colors.white.withValues(alpha: 0.50),
-                      letterSpacing: 0.3)),
-                ]),
+            const SizedBox(height: 12),
+            // Language + Theme icons — below Oracle badge
+            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              _HeaderIconBtn(
+                icon: Icons.language_outlined,
+                onTap: () {},  // Language switching deferred — coming soon
+              ),
+              const SizedBox(width: 8),
+              _HeaderIconBtn(
+                icon: Icons.palette_outlined,
+                onTap: () => LeapThemePicker.show(context),
               ),
             ]),
           ]),
@@ -408,6 +375,31 @@ class _LoginScreenState extends State<LoginScreen>
   }
 }
 
+
+
+// ─── Header icon button ───────────────────────────────────────────────────────
+
+class _HeaderIconBtn extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  const _HeaderIconBtn({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 36, height: 36,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+        ),
+        child: Icon(icon, color: Colors.white, size: 18),
+      ),
+    );
+  }
+}
 
 // ─── Instance card ────────────────────────────────────────────────────────────
 
@@ -846,104 +838,6 @@ class _ScanSheetState extends State<_ScanSheet> {
                     fontSize: 11, color: t.textMuted))),
           ],
         ],
-      ]),
-    );
-  }
-}
-
-
-// ─── Language picker sheet ────────────────────────────────────────────────────
-
-class _LanguagePickerSheet extends StatelessWidget {
-  const _LanguagePickerSheet();
-
-  @override
-  Widget build(BuildContext context) {
-    final t        = context.read<LeapThemeProvider>().theme;
-    final provider = context.watch<LocaleProvider>();
-
-    return Container(
-      decoration: BoxDecoration(
-        color: t.surface2,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      padding: EdgeInsets.fromLTRB(
-          20, 16, 20, MediaQuery.of(context).viewInsets.bottom + 32),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-
-        Center(child: Container(
-          width: 36, height: 4,
-          decoration: BoxDecoration(
-            color: t.border, borderRadius: BorderRadius.circular(2)),
-        )),
-        const SizedBox(height: 18),
-
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Text('Language',
-            style: TextStyle(fontFamily: 'PlusJakartaSans',
-                fontSize: 17, fontWeight: FontWeight.w800, color: t.text)),
-        ),
-        const SizedBox(height: 16),
-
-        // 2-column grid of language options
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            childAspectRatio: 3.2,
-          ),
-          itemCount: LocaleProvider.languages.length,
-          itemBuilder: (_, i) {
-            final lang     = LocaleProvider.languages[i];
-            final code     = lang['code']!;
-            final selected = provider.locale.languageCode == code;
-
-            return GestureDetector(
-              onTap: () {
-                provider.setLocale(Locale(code));
-                Navigator.pop(context);
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                  color: selected
-                      ? t.primary.withValues(alpha: 0.08)
-                      : t.surface1,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: selected ? t.primary : t.border,
-                    width: selected ? 2 : 1.5,
-                  ),
-                ),
-                child: Row(children: [
-                  Text(lang['flag']!,
-                      style: const TextStyle(fontSize: 18)),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(lang['name']!,
-                      style: TextStyle(
-                        fontFamily: 'PlusJakartaSans',
-                        fontSize: 12, fontWeight: FontWeight.w600,
-                        color: selected ? t.primary : t.text,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  if (selected)
-                    Icon(Icons.check_circle_rounded,
-                        color: t.primary, size: 16),
-                ]),
-              ),
-            );
-          },
-        ),
-        const SizedBox(height: 8),
       ]),
     );
   }

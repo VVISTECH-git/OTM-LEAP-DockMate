@@ -335,8 +335,8 @@ class _ShipmentGroupDetailScreenState
                       ),
                       child: Text(
                         _docs.isEmpty
-                            ? '📷  Upload Document'
-                            : '📤  Submit ${_docs.length} Document${_docs.length > 1 ? 's' : ''} to OTM',
+                            ? '📷  Add Documents'
+                            : '📤  Submit ${_docs.length} Document${_docs.length > 1 ? "s" : ""} to OTM',
                         style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w700),
@@ -754,7 +754,7 @@ class _DocumentsCard extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                         color: t.primary)),
                 const Spacer(),
-                Text('\${docs.length} / \${AppConstants.maxDocuments}',
+                Text('${docs.length} / ${AppConstants.maxDocuments}',
                     style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
