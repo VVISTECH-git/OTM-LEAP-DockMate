@@ -32,6 +32,8 @@
 	<string>LEAP DockMate accesses your photo library to upload dock operation photos.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>LEAP DockMate saves photos to your photo library.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>LEAP DockMate requires microphone access for camera functionality.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
