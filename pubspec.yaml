@@ -1,6 +1,6 @@
 name: leap_dockmate
 description: LEAP DockMate — Dock Operations for Oracle OTM
-version: 7.0.2+17
+version: 7.0.3+17
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
