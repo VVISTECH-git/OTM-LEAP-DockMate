@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -14,18 +15,6 @@ import '../../../l10n/app_localizations.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // LEAP DockMate — Login Screen
-//
-// Instance URL flow:
-//   • Active instance shown as a tappable card (friendly name + domain)
-//   • Tap → saved instances list (up to 5) + "Scan new" button
-//   • Scan QR or paste URL → live parse → confirm → saved & active
-//   • Raw URL never shown to users during normal login
-//
-// Auth logic preserved:
-//   • Rate limiting — 5 attempts then 30s lockout
-//   • Shake animation on failed login
-//   • Animated focus-state borders
-//   • Username auto-uppercase
 // ═══════════════════════════════════════════════════════════════════════════════
 
 class LoginScreen extends StatefulWidget {
@@ -37,6 +26,10 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen>
     with TickerProviderStateMixin {
 
+  // ── Auth tab state ─────────────────────────────────────────────────────────
+  bool _showQrTab = false; // default: manual entry
+
+  // ── Manual entry fields ────────────────────────────────────────────────────
   final _userIdCtrl    = TextEditingController();
   final _passwordCtrl  = TextEditingController();
   final _userIdFocus   = FocusNode();
@@ -68,24 +61,20 @@ class _LoginScreenState extends State<LoginScreen>
   @override
   void initState() {
     super.initState();
-
     _userIdFocus.addListener(() =>
         setState(() => _userIdFocused = _userIdFocus.hasFocus));
     _passwordFocus.addListener(() =>
         setState(() => _pwdFocused = _passwordFocus.hasFocus));
-
     _shakeCtrl = AnimationController(
         duration: const Duration(milliseconds: 400), vsync: this);
     _fadeCtrl  = AnimationController(
         duration: const Duration(milliseconds: 600), vsync: this)
       ..forward();
-
     _shakeAnim = TweenSequence<Offset>([
       TweenSequenceItem(tween: Tween(begin: Offset.zero,            end: const Offset(-0.02, 0)), weight: 20),
       TweenSequenceItem(tween: Tween(begin: const Offset(-0.02, 0), end: const Offset(0.02, 0)),  weight: 40),
       TweenSequenceItem(tween: Tween(begin: const Offset(0.02, 0),  end: Offset.zero),            weight: 40),
     ]).animate(CurvedAnimation(parent: _shakeCtrl, curve: Curves.easeInOut));
-
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
     _loadActive();
   }
@@ -115,15 +104,14 @@ class _LoginScreenState extends State<LoginScreen>
     });
   }
 
+  // ── Login with username + password ─────────────────────────────────────────
   Future<void> _login() async {
     if (_isLockedOut || _activeInstance == null) return;
-
     setState(() {
       _userIdError = false; _pwdError = false;
       _userIdErrorMsg = AppLocalizations.of(context)!.usernameRequired;
       _pwdErrorMsg = AppLocalizations.of(context)!.passwordRequired;
     });
-
     if (_userIdCtrl.text.trim().isEmpty || _passwordCtrl.text.trim().isEmpty) {
       setState(() {
         _userIdError = _userIdCtrl.text.trim().isEmpty;
@@ -133,9 +121,7 @@ class _LoginScreenState extends State<LoginScreen>
       _shakeCtrl.forward(from: 0);
       return;
     }
-
     setState(() => _loading = true);
-
     try {
       await AuthService.instance.login(
         instanceUrl: _activeInstance!.url,
@@ -152,11 +138,8 @@ class _LoginScreenState extends State<LoginScreen>
       ));
     } catch (e) {
       if (!mounted) return;
-
-      // Network / server errors should NOT count as a failed credential attempt.
       final isNetworkError = e is ApiException && (e.statusCode == null);
       if (!isNetworkError) _failedAttempts++;
-
       setState(() {
         _loading = false;
         _userIdError = !isNetworkError;
@@ -168,6 +151,39 @@ class _LoginScreenState extends State<LoginScreen>
       _shakeCtrl.forward(from: 0);
       if (!isNetworkError && _failedAttempts >= _maxAttempts) _startLockout();
     }
+  }
+
+  // ── Login via QR-scanned credentials ───────────────────────────────────────
+  Future<void> _loginWithCredentials(String userId, String password) async {
+    if (_activeInstance == null) {
+      _showSnack('Please set up an OTM instance first.');
+      return;
+    }
+    setState(() => _loading = true);
+    try {
+      await AuthService.instance.login(
+        instanceUrl: _activeInstance!.url,
+        userId:      userId,
+        password:    password,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(PageRouteBuilder(
+        pageBuilder: (_, __, ___) => const ShipmentGroupsScreen(),
+        transitionsBuilder: (_, anim, __, child) =>
+            FadeTransition(opacity: anim, child: child),
+        transitionDuration: const Duration(milliseconds: 400),
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      _showSnack(e.toString().replaceAll('Exception: ', ''));
+    }
+  }
+
+  void _showSnack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), behavior: SnackBarBehavior.floating));
   }
 
   void _openInstancePicker() {
@@ -203,174 +219,216 @@ class _LoginScreenState extends State<LoginScreen>
         children: [
           Column(children: [
 
-        // ── LEAP brand header ──────────────────────────────────────────
-        Container(
-          width: double.infinity,
-          color: t.navColor,
-          padding: EdgeInsets.only(
-            top: MediaQuery.of(context).padding.top + 24,
-            bottom: 28, left: 20, right: 20,
-          ),
-          child: Column(children: [
-                const Text('LEAP',
-                  style: TextStyle(fontFamily: 'PlusJakartaSans',
-                    fontSize: 40, fontWeight: FontWeight.w800,
-                    color: Colors.white, letterSpacing: 8, height: 1.0)),
-                const SizedBox(height: 5),
-                Row(mainAxisSize: MainAxisSize.min, children: [
-                  Container(width: 22, height: 1.5, color: t.accent),
-                  const SizedBox(width: 8),
-                  Text('DOCKMATE', style: TextStyle(fontFamily: 'PlusJakartaSans',
-                      fontSize: 11, fontWeight: FontWeight.w700,
-                      color: t.accent, letterSpacing: 5)),
-                  const SizedBox(width: 8),
-                  Container(width: 22, height: 1.5, color: t.accent),
-                ]),
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(100),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-                    color: Colors.white.withValues(alpha: 0.06),
-                  ),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Container(width: 6, height: 6,
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle, color: LeapPlatform.oracleOrange)),
-                    const SizedBox(width: 7),
-                    Text(AppLocalizations.of(context)!.poweredBy,
+          // ── LEAP brand header ──────────────────────────────────────────────
+          Container(
+            width: double.infinity,
+            color: t.navColor,
+            padding: EdgeInsets.only(
+              top: MediaQuery.of(context).padding.top + 24,
+              bottom: 28, left: 20, right: 20,
+            ),
+            child: Column(children: [
+              // LEAP + DOCKMATE centered together using IntrinsicWidth
+              IntrinsicWidth(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    const Text('LEAP',
+                      textAlign: TextAlign.center,
                       style: TextStyle(fontFamily: 'PlusJakartaSans',
-                        fontSize: 10, fontWeight: FontWeight.w600,
-                        color: Colors.white.withValues(alpha: 0.50),
-                        letterSpacing: 0.3)),
-                  ]),
-                ),
-          ]),
-        ),
-
-        // ── Form ──────────────────────────────────────────────────────
-        Expanded(
-          child: SafeArea(
-            top: false,
-            child: Center(
-              child: SingleChildScrollView(
-                padding: EdgeInsets.fromLTRB(24, 0, 24, MediaQuery.of(context).viewInsets.bottom + 24),
-                child: FadeTransition(
-                  opacity: _fadeAnim,
-                  child: SlideTransition(
-                    position: _shakeAnim,
-                    child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      const SizedBox(height: 24),
-
-                      _InstanceCard(
-                        instance: _activeInstance,
-                        theme: t,
-                        onTap: _openInstancePicker,
-                      ),
-                      const SizedBox(height: 16),
-
-                      _InputField(
-                        controller: _userIdCtrl,
-                        focusNode: _userIdFocus,
-                        label: l10n.username,
-                        hint: 'DOMAIN.USERNAME',
-                        icon: Icons.person_outline_rounded,
-                        hasError: _userIdError,
-                        isFocused: _userIdFocused,
-                        errorText: _userIdErrorMsg,
-                        theme: t,
-                        inputFormatters: [
-                          TextInputFormatter.withFunction((_, v) =>
-                              v.copyWith(text: v.text.toUpperCase())),
-                        ],
-                        onChanged: (_) => setState(() => _userIdError = false),
-                      ),
-                      const SizedBox(height: 12),
-
-                      _InputField(
-                        controller: _passwordCtrl,
-                        focusNode: _passwordFocus,
-                        label: l10n.password,
-                        hint: '••••••••',
-                        icon: Icons.lock_outline_rounded,
-                        obscureText: _obscurePassword,
-                        hasError: _pwdError,
-                        isFocused: _pwdFocused,
-                        errorText: _pwdErrorMsg,
-                        theme: t,
-                        suffixIcon: IconButton(
-                          padding: const EdgeInsets.all(12),
-                          icon: Icon(
-                            _obscurePassword
-                                ? Icons.visibility_off_outlined
-                                : Icons.visibility_outlined,
-                            color: _pwdFocused ? t.primary : t.textMuted,
-                            size: 22,
-                          ),
-                          onPressed: () =>
-                              setState(() => _obscurePassword = !_obscurePassword),
-                        ),
-                        onChanged: (_) => setState(() => _pwdError = false),
-                      ),
-                      const SizedBox(height: 24),
-
-                      SizedBox(
-                        width: double.infinity, height: 54,
-                        child: ElevatedButton(
-                          onPressed: (_loading || _isLockedOut ||
-                              _activeInstance == null) ? null : _login,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: _isLockedOut ? t.textMuted : t.primary,
-                            foregroundColor: Colors.white,
-                            disabledBackgroundColor: _isLockedOut
-                                ? t.textMuted
-                                : t.primary.withValues(alpha: 0.5),
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14)),
-                          ),
-                          child: _loading
-                              ? const SizedBox(width: 22, height: 22,
-                                  child: CircularProgressIndicator(
-                                      color: Colors.white, strokeWidth: 2.5))
-                              : _isLockedOut
-                                  ? Row(mainAxisSize: MainAxisSize.min, children: [
-                                      const Icon(Icons.lock_outline_rounded,
-                                          size: 16, color: Colors.white),
-                                      const SizedBox(width: 8),
-                                      Text(l10n.tryAgainIn(_lockoutCountdown),
-                                        style: const TextStyle(
-                                          fontFamily: 'PlusJakartaSans',
-                                          fontSize: 15, fontWeight: FontWeight.w700,
-                                          color: Colors.white)),
-                                    ])
-                                  : Text(l10n.signIn,
-                                      style: const TextStyle(fontFamily: 'PlusJakartaSans',
-                                          fontSize: 16, fontWeight: FontWeight.w700)),
-                        ),
-                      ),
-
-                      if (_failedAttempts > 0 && !_isLockedOut) ...[
-                        const SizedBox(height: 10),
-                        Text(
-                          l10n.attemptsRemaining(_maxAttempts - _failedAttempts),
-                          textAlign: TextAlign.center,
-                          style: TextStyle(fontFamily: 'PlusJakartaSans',
-                              fontSize: 11, color: t.danger,
-                              fontWeight: FontWeight.w500),
-                        ),
-                      ],
-                      const SizedBox(height: 24),
+                        fontSize: 40, fontWeight: FontWeight.w800,
+                        color: Colors.white, letterSpacing: 8, height: 1.0)),
+                    const SizedBox(height: 5),
+                    Row(mainAxisSize: MainAxisSize.min, children: [
+                      Container(width: 22, height: 1.5, color: t.accent),
+                      const SizedBox(width: 8),
+                      Text('DOCKMATE', style: TextStyle(fontFamily: 'PlusJakartaSans',
+                          fontSize: 11, fontWeight: FontWeight.w700,
+                          color: t.accent, letterSpacing: 5)),
+                      const SizedBox(width: 8),
+                      Container(width: 22, height: 1.5, color: t.accent),
                     ]),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(100),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+                  color: Colors.white.withValues(alpha: 0.06),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Container(width: 6, height: 6,
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle, color: LeapPlatform.oracleOrange)),
+                  const SizedBox(width: 7),
+                  Text(AppLocalizations.of(context)!.poweredBy,
+                    style: TextStyle(fontFamily: 'PlusJakartaSans',
+                      fontSize: 10, fontWeight: FontWeight.w600,
+                      color: Colors.white.withValues(alpha: 0.50),
+                      letterSpacing: 0.3)),
+                ]),
+              ),
+            ]),
+          ),
+
+          // ── Form area ──────────────────────────────────────────────────────
+          Expanded(
+            child: SafeArea(
+              top: false,
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: EdgeInsets.fromLTRB(24, 0, 24,
+                      MediaQuery.of(context).viewInsets.bottom + 24),
+                  child: FadeTransition(
+                    opacity: _fadeAnim,
+                    child: SlideTransition(
+                      position: _shakeAnim,
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        const SizedBox(height: 24),
+
+                        // Instance card
+                        _InstanceCard(
+                          instance: _activeInstance,
+                          theme: t,
+                          onTap: _openInstancePicker,
+                        ),
+                        const SizedBox(height: 16),
+
+                        // ── Main tabs: Scan QR | Enter manually ────────────
+                        Container(
+                          decoration: BoxDecoration(
+                            color: t.border.withValues(alpha: 0.3),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          padding: const EdgeInsets.all(3),
+                          child: Row(children: [
+                            Expanded(child: _MainTab(
+                              label: 'Scan QR',
+                              active: _showQrTab,
+                              theme: t,
+                              onTap: () => setState(() => _showQrTab = true),
+                            )),
+                            Expanded(child: _MainTab(
+                              label: l10n.enterManually,
+                              active: !_showQrTab,
+                              theme: t,
+                              onTap: () => setState(() => _showQrTab = false),
+                            )),
+                          ]),
+                        ),
+                        const SizedBox(height: 16),
+
+                        // ── Tab content ────────────────────────────────────
+                        if (_showQrTab)
+                          _QrLoginPanel(
+                            theme: t,
+                            onCredentials: _loginWithCredentials,
+                            loading: _loading,
+                          )
+                        else ...[
+                          _InputField(
+                            controller: _userIdCtrl,
+                            focusNode: _userIdFocus,
+                            label: l10n.username,
+                            hint: 'DOMAIN.USERNAME',
+                            icon: Icons.person_outline_rounded,
+                            hasError: _userIdError,
+                            isFocused: _userIdFocused,
+                            errorText: _userIdErrorMsg,
+                            theme: t,
+                            inputFormatters: [
+                              TextInputFormatter.withFunction((_, v) =>
+                                  v.copyWith(text: v.text.toUpperCase())),
+                            ],
+                            onChanged: (_) => setState(() => _userIdError = false),
+                          ),
+                          const SizedBox(height: 12),
+                          _InputField(
+                            controller: _passwordCtrl,
+                            focusNode: _passwordFocus,
+                            label: l10n.password,
+                            hint: '••••••••',
+                            icon: Icons.lock_outline_rounded,
+                            obscureText: _obscurePassword,
+                            hasError: _pwdError,
+                            isFocused: _pwdFocused,
+                            errorText: _pwdErrorMsg,
+                            theme: t,
+                            suffixIcon: IconButton(
+                              padding: const EdgeInsets.all(12),
+                              icon: Icon(
+                                _obscurePassword
+                                    ? Icons.visibility_off_outlined
+                                    : Icons.visibility_outlined,
+                                color: _pwdFocused ? t.primary : t.textMuted,
+                                size: 22,
+                              ),
+                              onPressed: () =>
+                                  setState(() => _obscurePassword = !_obscurePassword),
+                            ),
+                            onChanged: (_) => setState(() => _pwdError = false),
+                          ),
+                          const SizedBox(height: 24),
+                          SizedBox(
+                            width: double.infinity, height: 54,
+                            child: ElevatedButton(
+                              onPressed: (_loading || _isLockedOut ||
+                                  _activeInstance == null) ? null : _login,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _isLockedOut ? t.textMuted : t.primary,
+                                foregroundColor: Colors.white,
+                                disabledBackgroundColor: _isLockedOut
+                                    ? t.textMuted
+                                    : t.primary.withValues(alpha: 0.5),
+                                elevation: 0,
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14)),
+                              ),
+                              child: _loading
+                                  ? const SizedBox(width: 22, height: 22,
+                                      child: CircularProgressIndicator(
+                                          color: Colors.white, strokeWidth: 2.5))
+                                  : _isLockedOut
+                                      ? Row(mainAxisSize: MainAxisSize.min, children: [
+                                          const Icon(Icons.lock_outline_rounded,
+                                              size: 16, color: Colors.white),
+                                          const SizedBox(width: 8),
+                                          Text(l10n.tryAgainIn(_lockoutCountdown),
+                                            style: const TextStyle(
+                                              fontFamily: 'PlusJakartaSans',
+                                              fontSize: 15, fontWeight: FontWeight.w700,
+                                              color: Colors.white)),
+                                        ])
+                                      : Text(l10n.signIn,
+                                          style: const TextStyle(
+                                              fontFamily: 'PlusJakartaSans',
+                                              fontSize: 16, fontWeight: FontWeight.w700)),
+                            ),
+                          ),
+                          if (_failedAttempts > 0 && !_isLockedOut) ...[
+                            const SizedBox(height: 10),
+                            Text(
+                              l10n.attemptsRemaining(_maxAttempts - _failedAttempts),
+                              textAlign: TextAlign.center,
+                              style: TextStyle(fontFamily: 'PlusJakartaSans',
+                                  fontSize: 11, color: t.danger,
+                                  fontWeight: FontWeight.w500),
+                            ),
+                          ],
+                        ],
+                        const SizedBox(height: 24),
+                      ]),
+                    ),
                   ),
                 ),
               ),
             ),
           ),
-        ),
           ]),
-          // ── Palette icon — screen top-right ─────
+          // ── Palette icon ───────────────────────────────────────────────────
           Positioned(
             top: MediaQuery.of(context).padding.top + 8,
             right: 16,
@@ -385,7 +443,312 @@ class _LoginScreenState extends State<LoginScreen>
   }
 }
 
+// ─── Main tab button ──────────────────────────────────────────────────────────
 
+class _MainTab extends StatelessWidget {
+  final String label;
+  final bool active;
+  final AppThemeData theme;
+  final VoidCallback onTap;
+  const _MainTab({required this.label, required this.active,
+      required this.theme, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(vertical: 9),
+        decoration: BoxDecoration(
+          color: active ? theme.primary : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(label,
+          textAlign: TextAlign.center,
+          style: TextStyle(fontFamily: 'PlusJakartaSans',
+              fontSize: 13, fontWeight: FontWeight.w700,
+              color: active ? Colors.white : theme.textMuted)),
+      ),
+    );
+  }
+}
+
+// ─── QR Login Panel ───────────────────────────────────────────────────────────
+
+class _QrLoginPanel extends StatefulWidget {
+  final AppThemeData theme;
+  final Future<void> Function(String userId, String password) onCredentials;
+  final bool loading;
+  const _QrLoginPanel({required this.theme, required this.onCredentials,
+      required this.loading});
+
+  @override
+  State<_QrLoginPanel> createState() => _QrLoginPanelState();
+}
+
+class _QrLoginPanelState extends State<_QrLoginPanel> {
+  bool _showCamera = true; // camera or gallery sub-tab
+  bool _scanning   = false;
+  final _galleryPicker = ImagePicker();
+  bool? _cameraGranted;
+
+  @override
+  void initState() {
+    super.initState();
+    _requestCameraPermission();
+  }
+
+  Future<void> _requestCameraPermission() async {
+    final status = await Permission.camera.request();
+    if (!mounted) return;
+    setState(() => _cameraGranted = status.isGranted);
+    if (status.isPermanentlyDenied) {
+      showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Camera Access Required',
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+          content: const Text(
+            'Camera permission is required to scan QR codes. '
+            'Open Settings → Apps → DockMate → Permissions.',
+            style: TextStyle(fontSize: 14),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Not Now')),
+            ElevatedButton(
+              onPressed: () async { Navigator.pop(context); await openAppSettings(); },
+              child: const Text('Open Settings'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  void _onDetect(BarcodeCapture capture) {
+    if (_scanning) return;
+    final raw = capture.barcodes.firstOrNull?.rawValue ?? '';
+    if (raw.isEmpty) return;
+    _scanning = true;
+    _handleQrData(raw);
+  }
+
+  Future<void> _pickFromGallery() async {
+    final xfile = await _galleryPicker.pickImage(source: ImageSource.gallery);
+    if (xfile == null) return;
+    final result = await MobileScannerController().analyzeImage(xfile.path);
+    if (result == null || result.barcodes.isEmpty) {
+      if (mounted) _showSnack('No QR code found in this image.');
+      return;
+    }
+    final raw = result.barcodes.first.rawValue ?? '';
+    _handleQrData(raw);
+  }
+
+  void _handleQrData(String raw) {
+    // Try to parse as credential QR: base64-encoded JSON {"u":"USERNAME","p":"PASSWORD"}
+    try {
+      final decoded = utf8.decode(base64Decode(raw));
+      final json = jsonDecode(decoded) as Map<String, dynamic>;
+      final userId   = json['u']?.toString() ?? '';
+      final password = json['p']?.toString() ?? '';
+      if (userId.isNotEmpty && password.isNotEmpty) {
+        widget.onCredentials(userId, password);
+        return;
+      }
+    } catch (_) {}
+    if (mounted) _showSnack('Invalid credential QR code.');
+    _scanning = false;
+  }
+
+  void _showSnack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), behavior: SnackBarBehavior.floating));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.theme;
+    return Column(children: [
+      // ── Sub-tabs: Camera | From gallery ───────────────────────────────────
+      Container(
+        decoration: BoxDecoration(
+          color: t.surface1,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        padding: const EdgeInsets.all(2),
+        child: Row(children: [
+          Expanded(child: _SubTab(
+            label: 'Camera',
+            active: _showCamera,
+            theme: t,
+            onTap: () => setState(() => _showCamera = true),
+          )),
+          Expanded(child: _SubTab(
+            label: 'From gallery',
+            active: !_showCamera,
+            theme: t,
+            onTap: () => setState(() => _showCamera = false),
+          )),
+        ]),
+      ),
+      const SizedBox(height: 12),
+
+      // ── Content ───────────────────────────────────────────────────────────
+      Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: t.surface2,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: t.border),
+        ),
+        child: _showCamera ? _buildCamera(t) : _buildGallery(t),
+      ),
+
+      // ── Warning ───────────────────────────────────────────────────────────
+      const SizedBox(height: 10),
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: t.warning.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: t.warning.withValues(alpha: 0.3)),
+        ),
+        child: Row(children: [
+          Icon(Icons.info_outline_rounded, color: t.warning, size: 14),
+          const SizedBox(width: 8),
+          Expanded(child: Text(
+            'QR encodes username + password. Use on trusted devices only.',
+            style: TextStyle(fontFamily: 'PlusJakartaSans',
+                fontSize: 11, color: t.warning),
+          )),
+        ]),
+      ),
+    ]);
+  }
+
+  Widget _buildCamera(AppThemeData t) {
+    return Column(children: [
+      ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: SizedBox(
+          height: 200,
+          child: _cameraGranted == null
+              ? const Center(child: CircularProgressIndicator())
+              : _cameraGranted == true
+                  ? Stack(children: [
+                      MobileScanner(onDetect: _onDetect),
+                      // Corner guides
+                      Positioned.fill(child: CustomPaint(
+                          painter: _QrCornerPainter())),
+                    ])
+                  : _CameraPermissionPlaceholder(
+                      onRetry: _requestCameraPermission),
+        ),
+      ),
+      const SizedBox(height: 10),
+      Text('Point camera at your credential QR code',
+        textAlign: TextAlign.center,
+        style: TextStyle(fontFamily: 'PlusJakartaSans',
+            fontSize: 12, color: t.textMuted)),
+    ]);
+  }
+
+  Widget _buildGallery(AppThemeData t) {
+    return Column(children: [
+      const SizedBox(height: 16),
+      Icon(Icons.photo_library_outlined, color: t.primary, size: 36),
+      const SizedBox(height: 12),
+      SizedBox(
+        width: double.infinity, height: 48,
+        child: ElevatedButton(
+          onPressed: widget.loading ? null : _pickFromGallery,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: t.primary, foregroundColor: Colors.white,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10)),
+          ),
+          child: const Text('Pick QR from gallery',
+            style: TextStyle(fontFamily: 'PlusJakartaSans',
+                fontSize: 13, fontWeight: FontWeight.w700)),
+        ),
+      ),
+      const SizedBox(height: 10),
+      Text('Select an image containing your credential QR code',
+        textAlign: TextAlign.center,
+        style: TextStyle(fontFamily: 'PlusJakartaSans',
+            fontSize: 12, color: t.textMuted)),
+      const SizedBox(height: 16),
+    ]);
+  }
+}
+
+// ─── Sub tab ──────────────────────────────────────────────────────────────────
+
+class _SubTab extends StatelessWidget {
+  final String label;
+  final bool active;
+  final AppThemeData theme;
+  final VoidCallback onTap;
+  const _SubTab({required this.label, required this.active,
+      required this.theme, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(vertical: 7),
+        decoration: BoxDecoration(
+          color: active ? theme.primary : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Text(label,
+          textAlign: TextAlign.center,
+          style: TextStyle(fontFamily: 'PlusJakartaSans',
+              fontSize: 12, fontWeight: FontWeight.w700,
+              color: active ? Colors.white : theme.textMuted)),
+      ),
+    );
+  }
+}
+
+// ─── QR corner painter ────────────────────────────────────────────────────────
+
+class _QrCornerPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0xFF2451C6)
+      ..strokeWidth = 3
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+    const len = 20.0;
+    const pad = 10.0;
+    final corners = [
+      // top-left
+      [const Offset(pad, pad + len), const Offset(pad, pad), const Offset(pad + len, pad)],
+      // top-right
+      [Offset(size.width - pad - len, pad), Offset(size.width - pad, pad), Offset(size.width - pad, pad + len)],
+      // bottom-left
+      [Offset(pad, size.height - pad - len), Offset(pad, size.height - pad), Offset(pad + len, size.height - pad)],
+      // bottom-right
+      [Offset(size.width - pad - len, size.height - pad), Offset(size.width - pad, size.height - pad), Offset(size.width - pad, size.height - pad - len)],
+    ];
+    for (final c in corners) {
+      final path = Path()..moveTo(c[0].dx, c[0].dy)..lineTo(c[1].dx, c[1].dy)..lineTo(c[2].dx, c[2].dy);
+      canvas.drawPath(path, paint);
+    }
+  }
+  @override
+  bool shouldRepaint(_) => false;
+}
 
 // ─── Header icon button ───────────────────────────────────────────────────────
 
@@ -468,7 +831,6 @@ class _InstanceCard extends StatelessWidget {
   }
 }
 
-
 // ─── Env badge ────────────────────────────────────────────────────────────────
 
 class _EnvBadge extends StatelessWidget {
@@ -496,7 +858,6 @@ class _EnvBadge extends StatelessWidget {
     );
   }
 }
-
 
 // ─── Instance picker sheet ────────────────────────────────────────────────────
 
@@ -533,7 +894,6 @@ class _InstancePickerSheetState extends State<_InstancePickerSheet> {
   }
 
   void _scanNew() {
-    // Capture everything needed BEFORE popping (while context is still alive)
     final themeProvider = context.read<LeapThemeProvider>();
     final onSelected    = widget.onSelected;
     final nav           = Navigator.of(context);
@@ -603,21 +963,18 @@ class _InstancePickerSheetState extends State<_InstancePickerSheet> {
                   color: t.danger.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(Icons.delete_outline_rounded,
-                    color: t.danger, size: 22),
+                child: Icon(Icons.delete_outline_rounded, color: t.danger, size: 22),
               ),
               onDismissed: (_) => _delete(inst),
               child: GestureDetector(
                 onTap: () => _select(inst),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 14),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                   decoration: BoxDecoration(
                     color: t.surface2,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: inst == widget.activeInstance
-                          ? t.primary : t.border,
+                      color: inst == widget.activeInstance ? t.primary : t.border,
                       width: inst == widget.activeInstance ? 2 : 1.5,
                     ),
                   ),
@@ -627,8 +984,7 @@ class _InstancePickerSheetState extends State<_InstancePickerSheet> {
                       children: [
                         Text(inst.displayName, style: TextStyle(
                             fontFamily: 'PlusJakartaSans',
-                            fontSize: 14, fontWeight: FontWeight.w700,
-                            color: t.text)),
+                            fontSize: 14, fontWeight: FontWeight.w700, color: t.text)),
                         const SizedBox(height: 2),
                         Text(inst.domain, style: TextStyle(
                             fontFamily: 'PlusJakartaSans',
@@ -638,8 +994,7 @@ class _InstancePickerSheetState extends State<_InstancePickerSheet> {
                     _EnvBadge(instance: inst, theme: t),
                     if (inst == widget.activeInstance) ...[
                       const SizedBox(width: 8),
-                      Icon(Icons.check_circle_rounded,
-                          color: t.primary, size: 18),
+                      Icon(Icons.check_circle_rounded, color: t.primary, size: 18),
                     ],
                   ]),
                 ),
@@ -652,15 +1007,13 @@ class _InstancePickerSheetState extends State<_InstancePickerSheet> {
           width: double.infinity, height: 50,
           child: OutlinedButton.icon(
             onPressed: _scanNew,
-            icon: Icon(Icons.qr_code_scanner_rounded,
-                color: t.primary, size: 18),
+            icon: Icon(Icons.qr_code_scanner_rounded, color: t.primary, size: 18),
             label: Text(l10n.scanNewInstance,
               style: TextStyle(fontFamily: 'PlusJakartaSans',
                   fontWeight: FontWeight.w700, color: t.primary)),
             style: OutlinedButton.styleFrom(
               side: BorderSide(color: t.primary, width: 1.5),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
         ),
@@ -669,8 +1022,7 @@ class _InstancePickerSheetState extends State<_InstancePickerSheet> {
   }
 }
 
-
-// ─── Scan / manual entry sheet ────────────────────────────────────────────────
+// ─── Instance scan sheet (OTM URL QR) ────────────────────────────────────────
 
 class _ScanSheet extends StatefulWidget {
   final void Function(OtmInstance) onSaved;
@@ -681,14 +1033,43 @@ class _ScanSheet extends StatefulWidget {
 }
 
 class _ScanSheetState extends State<_ScanSheet> {
-  bool _scanned    = false;
-  bool _showManual = false;
+  bool _scanned     = false;
   bool _showGallery = false;
   OtmInstance? _parsed;
-  final _urlCtrl = TextEditingController();
+  final _urlCtrl       = TextEditingController();
   final _galleryPicker = ImagePicker();
+  bool? _cameraGranted;
 
-  bool? _cameraGranted; // null = pending, true = granted, false = denied
+  @override
+  void initState() { super.initState(); _requestCameraPermission(); }
+
+  Future<void> _requestCameraPermission() async {
+    final status = await Permission.camera.request();
+    if (!mounted) return;
+    setState(() => _cameraGranted = status.isGranted);
+    if (status.isPermanentlyDenied) {
+      showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Camera Access Required',
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+          content: const Text(
+            'Camera permission is required to scan QR codes. '
+            'Open Settings → Apps → DockMate → Permissions.',
+            style: TextStyle(fontSize: 14),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Not Now')),
+            ElevatedButton(
+              onPressed: () async { Navigator.pop(context); await openAppSettings(); },
+              child: const Text('Open Settings'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
 
   Future<void> _pickQrFromGallery() async {
     final xfile = await _galleryPicker.pickImage(source: ImageSource.gallery);
@@ -700,7 +1081,11 @@ class _ScanSheetState extends State<_ScanSheet> {
     }
     final raw = result.barcodes.first.rawValue ?? '';
     final inst = OtmInstanceService.parse(raw);
-    if (inst != null && mounted) setState(() { _scanned = true; _parsed = inst; });
+    if (inst != null && mounted) {
+      setState(() { _scanned = true; _parsed = inst; });
+    } else if (mounted) {
+      _showSnack('QR code does not contain a valid OTM instance URL.');
+    }
   }
 
   void _showSnack(String msg) {
@@ -710,59 +1095,14 @@ class _ScanSheetState extends State<_ScanSheet> {
   }
 
   @override
-  void initState() {
-    super.initState();
-    _requestCameraPermission();
-  }
-
-  Future<void> _requestCameraPermission() async {
-    final status = await Permission.camera.request();
-    if (!mounted) return;
-    setState(() => _cameraGranted = status.isGranted);
-    if (status.isPermanentlyDenied) _showSettingsDialog();
-  }
-
-  void _showSettingsDialog() {
-    showDialog<void>(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Camera Access Required',
-            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-        content: const Text(
-          'Camera permission is required to scan QR codes. '
-          'To enable it, open Settings → Apps → DockMate → Permissions.',
-          style: TextStyle(fontSize: 14),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Not Now'),
-          ),
-          ElevatedButton(
-            onPressed: () async { Navigator.pop(context); await openAppSettings(); },
-            child: const Text('Open Settings'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  @override
-  void dispose() {
-    _urlCtrl.dispose();
-    super.dispose();
-  }
+  void dispose() { _urlCtrl.dispose(); super.dispose(); }
 
   void _onDetect(BarcodeCapture capture) {
     if (_scanned) return;
     final raw = capture.barcodes.firstOrNull?.rawValue ?? '';
     if (raw.isEmpty) return;
     final inst = OtmInstanceService.parse(raw);
-    if (inst != null && mounted) {
-      _scanned = true;
-      setState(() => _parsed = inst);
-    }
+    if (inst != null && mounted) { _scanned = true; setState(() => _parsed = inst); }
   }
 
   Future<void> _confirm() async {
@@ -789,13 +1129,11 @@ class _ScanSheetState extends State<_ScanSheet> {
             decoration: BoxDecoration(color: t.border,
                 borderRadius: BorderRadius.circular(2)))),
         const SizedBox(height: 18),
-
         Text(_parsed != null ? l10n.confirmInstance : l10n.addOtmInstance,
           style: TextStyle(fontFamily: 'PlusJakartaSans',
               fontSize: 17, fontWeight: FontWeight.w800, color: t.text)),
         const SizedBox(height: 16),
 
-        // ── Confirmed result ─────────────────────────────────────────
         if (_parsed != null) ...[
           Container(
             width: double.infinity,
@@ -826,8 +1164,7 @@ class _ScanSheetState extends State<_ScanSheet> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: t.primary, foregroundColor: Colors.white,
                 elevation: 0,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
               child: Text(l10n.saveAndUse,
                 style: const TextStyle(fontFamily: 'PlusJakartaSans',
@@ -840,90 +1177,30 @@ class _ScanSheetState extends State<_ScanSheet> {
               _urlCtrl.clear();
               setState(() { _parsed = null; _scanned = false; });
             },
-            child: Text(l10n.scanAgain, style: TextStyle(
-                fontFamily: 'PlusJakartaSans',
-                color: t.primary, fontWeight: FontWeight.w600)),
-          ),
-
-        // ── Scanner / manual ─────────────────────────────────────────
-        ] else ...[
-          Row(children: [
-            Expanded(child: GestureDetector(
-              onTap: () => setState(() { _showManual = false; _showGallery = false; }),
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(
-                  color: !_showManual && !_showGallery ? t.primary : t.surface1,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                      color: !_showManual && !_showGallery ? t.primary : t.border),
-                ),
-                child: Text(l10n.scanQrCode, textAlign: TextAlign.center,
-                  style: TextStyle(fontFamily: 'PlusJakartaSans',
-                      fontSize: 13, fontWeight: FontWeight.w700,
-                      color: !_showManual && !_showGallery ? Colors.white : t.textMuted)),
-              ),
-            )),
-            const SizedBox(width: 8),
-            Expanded(child: GestureDetector(
-              onTap: () => setState(() { _showManual = false; _showGallery = true; }),
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(
-                  color: _showGallery ? t.primary : t.surface1,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: _showGallery ? t.primary : t.border),
-                ),
-                child: Text('From Gallery', textAlign: TextAlign.center,
-                  style: TextStyle(fontFamily: 'PlusJakartaSans',
-                      fontSize: 13, fontWeight: FontWeight.w700,
-                      color: _showGallery ? Colors.white : t.textMuted)),
-              ),
-            )),
-            const SizedBox(width: 8),
-            Expanded(child: GestureDetector(
-              onTap: () => setState(() { _showManual = true; _showGallery = false; }),
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(
-                  color: _showManual ? t.primary : t.surface1,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                      color: _showManual ? t.primary : t.border),
-                ),
-                child: Text(l10n.enterManually, textAlign: TextAlign.center,
-                  style: TextStyle(fontFamily: 'PlusJakartaSans',
-                      fontSize: 13, fontWeight: FontWeight.w700,
-                      color: _showManual ? Colors.white : t.textMuted)),
-              ),
-            )),
-          ]),
-          const SizedBox(height: 16),
-
-          if (_showGallery) ...[ 
-            SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: ElevatedButton.icon(
-                onPressed: _pickQrFromGallery,
-                icon: const Icon(Icons.photo_library_outlined),
-                label: const Text('Pick QR from Gallery',
-                  style: TextStyle(fontFamily: 'PlusJakartaSans',
-                      fontSize: 14, fontWeight: FontWeight.w700)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: t.primary, foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text('Select an image from your gallery that contains a QR code.',
-              textAlign: TextAlign.center,
+            child: Text(l10n.scanAgain,
               style: TextStyle(fontFamily: 'PlusJakartaSans',
-                  fontSize: 12, color: t.textMuted)),
-          ] else if (!_showManual) ...[
+                  color: t.primary, fontWeight: FontWeight.w600)),
+          ),
+        ] else ...[
+          // Sub-tabs: Camera | Gallery
+          Container(
+            decoration: BoxDecoration(
+              color: t.surface1, borderRadius: BorderRadius.circular(8)),
+            padding: const EdgeInsets.all(2),
+            child: Row(children: [
+              Expanded(child: _SubTab(
+                label: 'Camera', active: !_showGallery, theme: t,
+                onTap: () => setState(() => _showGallery = false),
+              )),
+              Expanded(child: _SubTab(
+                label: 'From gallery', active: _showGallery, theme: t,
+                onTap: () => setState(() => _showGallery = true),
+              )),
+            ]),
+          ),
+          const SizedBox(height: 12),
+
+          if (!_showGallery) ...[
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: SizedBox(
@@ -931,55 +1208,48 @@ class _ScanSheetState extends State<_ScanSheet> {
                 child: _cameraGranted == null
                     ? const Center(child: CircularProgressIndicator())
                     : _cameraGranted == true
-                        ? MobileScanner(onDetect: _onDetect)
-                        : _CameraPermissionPlaceholder(
-                            onRetry: _requestCameraPermission),
+                        ? Stack(children: [
+                            MobileScanner(onDetect: _onDetect),
+                            Positioned.fill(child: CustomPaint(painter: _QrCornerPainter())),
+                          ])
+                        : _CameraPermissionPlaceholder(onRetry: _requestCameraPermission),
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Text(l10n.pointCamera,
               textAlign: TextAlign.center,
               style: TextStyle(fontFamily: 'PlusJakartaSans',
                   fontSize: 12, color: t.textMuted)),
           ] else ...[
-            Container(
-              decoration: BoxDecoration(
-                color: t.surface2,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: t.border, width: 1.5),
-              ),
-              child: TextField(
-                controller: _urlCtrl,
-                onChanged: (v) {
-                  final inst = OtmInstanceService.parse(v);
-                  if (!mounted) return;
-                  setState(() => _parsed = inst);
-                },
-                style: TextStyle(fontFamily: 'PlusJakartaSans',
-                    fontSize: 13, color: t.text),
-                decoration: InputDecoration(
-                  hintText: 'https://otmgtm-...',
-                  hintStyle: TextStyle(color: t.textMuted, fontSize: 13),
-                  prefixIcon: Icon(Icons.link_rounded,
-                      color: t.textMuted, size: 18),
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 14),
+            const SizedBox(height: 16),
+            Icon(Icons.photo_library_outlined, color: t.primary, size: 36),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity, height: 48,
+              child: ElevatedButton(
+                onPressed: _pickQrFromGallery,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: t.primary, foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
+                child: const Text('Pick QR from gallery',
+                  style: TextStyle(fontFamily: 'PlusJakartaSans',
+                      fontSize: 13, fontWeight: FontWeight.w700)),
               ),
             ),
-            const SizedBox(height: 8),
-            Align(alignment: Alignment.centerLeft,
-              child: Text(l10n.urlValidating,
-                style: TextStyle(fontFamily: 'PlusJakartaSans',
-                    fontSize: 11, color: t.textMuted))),
+            const SizedBox(height: 10),
+            Text('Select an image containing the OTM instance QR code',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontFamily: 'PlusJakartaSans',
+                  fontSize: 12, color: t.textMuted)),
+            const SizedBox(height: 16),
           ],
         ],
       ]),
     );
   }
 }
-
 
 // ─── Input field ──────────────────────────────────────────────────────────────
 
@@ -1044,13 +1314,11 @@ class _InputField extends StatelessWidget {
                 color: hasError ? theme.danger
                     : isFocused ? theme.primary : theme.textMuted,
                 fontSize: 14),
-              hintStyle: TextStyle(
-                  color: theme.textMuted.withValues(alpha: 0.5)),
+              hintStyle: TextStyle(color: theme.textMuted.withValues(alpha: 0.5)),
               prefixIcon: Icon(icon, color: _iconColor, size: 20),
               suffixIcon: suffixIcon,
               border: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 16),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
               floatingLabelBehavior: FloatingLabelBehavior.never,
             ),
           ),
@@ -1067,7 +1335,7 @@ class _InputField extends StatelessWidget {
   }
 }
 
-// ─── Camera Permission Placeholder ───────────────────────────────────────────
+// ─── Camera permission placeholder ───────────────────────────────────────────
 
 class _CameraPermissionPlaceholder extends StatelessWidget {
   const _CameraPermissionPlaceholder({required this.onRetry});
@@ -1080,21 +1348,16 @@ class _CameraPermissionPlaceholder extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.no_photography_rounded,
-              color: Colors.white54, size: 40),
+          const Icon(Icons.no_photography_rounded, color: Colors.white54, size: 40),
           const SizedBox(height: 12),
-          const Text(
-            'Camera access denied',
-            style: TextStyle(color: Colors.white70, fontSize: 13),
-          ),
+          const Text('Camera access denied',
+              style: TextStyle(color: Colors.white70, fontSize: 13)),
           const SizedBox(height: 12),
           TextButton.icon(
             onPressed: onRetry,
             icon: const Icon(Icons.refresh_rounded, color: Colors.white),
-            label: const Text(
-              'Grant Permission',
-              style: TextStyle(color: Colors.white),
-            ),
+            label: const Text('Grant Permission',
+                style: TextStyle(color: Colors.white)),
           ),
         ],
       ),

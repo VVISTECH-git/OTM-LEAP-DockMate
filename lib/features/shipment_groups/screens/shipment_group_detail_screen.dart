@@ -12,7 +12,6 @@ import '../../../core/theme/leap_theme.dart';
 import '../models/shipment_group_model.dart';
 import '../../documents/services/document_service.dart';
 import '../../shipments/screens/shipments_screen.dart';
-import '../services/shipment_group_service.dart';
 import '../../../l10n/app_localizations.dart';
 
 class ShipmentGroupDetailScreen extends StatefulWidget {
@@ -36,16 +35,15 @@ class _ShipmentGroupDetailScreenState
   int    _uploadCurrent   = 0;
   int    _uploadTotal     = 0;
 
-  // Resolved group with location names
+  // Group — location names already resolved from the list screen
   late ShipmentGroup _group;
-  bool _loadingLocations = true;
-  bool _locationError    = false;
+  // No secondary API call needed — sourceLocationName and destLocationName
+  // are populated by fetchGroups via expand=sourceLocation,destLocation
 
   @override
   void initState() {
     super.initState();
     _group = widget.group;
-    _resolveLocationNames();
   }
 
   @override
@@ -57,19 +55,6 @@ class _ShipmentGroupDetailScreenState
   static void _deleteStagedFiles(List<DocumentFile> docs) {
     for (final doc in docs) {
       try { if (doc.file.existsSync()) doc.file.deleteSync(); } catch (_) {}
-    }
-  }
-
-  Future<void> _resolveLocationNames() async {
-    try {
-      final resolved = await ShipmentGroupService.instance.fetchById(
-        widget.group.shipGroupGid,
-      );
-      if (mounted) setState(() { _group = resolved; _loadingLocations = false; });
-    } catch (_) {
-      if (mounted) {
-        setState(() { _loadingLocations = false; _locationError = true; });
-      }
     }
   }
 
@@ -378,46 +363,13 @@ class _ShipmentGroupDetailScreenState
           ),
         ],
       ),
-      body: _loadingLocations
-          ? Center(
-              child: CircularProgressIndicator(
-                color: context.watch<LeapThemeProvider>().theme.primary,
-                strokeWidth: 2.5,
-              ),
-            )
-          : Stack(
+      body: Stack(
         children: [
           SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(14, 14, 14, 110),
             child: Column(
               children: [
                 _InfoCard(group: g, fmtEet: _fmtEet),
-                if (_locationError)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFFF3E0),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFFF97316)),
-                      ),
-                      child: Row(children: const [
-                        Icon(Icons.warning_amber_rounded,
-                            color: Color(0xFFF97316), size: 16),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Could not load location names — showing location IDs.',
-                            style: TextStyle(
-                                fontSize: 12, color: Color(0xFF7A4000)),
-                          ),
-                        ),
-                      ]),
-                    ),
-                  ),
                 const SizedBox(height: 12),
                 _DocumentsCard(
                   docs: _docs,
