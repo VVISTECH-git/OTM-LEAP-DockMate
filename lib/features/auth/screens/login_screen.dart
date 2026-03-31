@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
@@ -682,10 +683,31 @@ class _ScanSheet extends StatefulWidget {
 class _ScanSheetState extends State<_ScanSheet> {
   bool _scanned    = false;
   bool _showManual = false;
+  bool _showGallery = false;
   OtmInstance? _parsed;
   final _urlCtrl = TextEditingController();
+  final _galleryPicker = ImagePicker();
 
   bool? _cameraGranted; // null = pending, true = granted, false = denied
+
+  Future<void> _pickQrFromGallery() async {
+    final xfile = await _galleryPicker.pickImage(source: ImageSource.gallery);
+    if (xfile == null) return;
+    final result = await MobileScannerController().analyzeImage(xfile.path);
+    if (result == null || result.barcodes.isEmpty) {
+      if (mounted) _showSnack('No QR code found in this image.');
+      return;
+    }
+    final raw = result.barcodes.first.rawValue ?? '';
+    final inst = OtmInstanceService.parse(raw);
+    if (inst != null && mounted) setState(() { _scanned = true; _parsed = inst; });
+  }
+
+  void _showSnack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), behavior: SnackBarBehavior.floating));
+  }
 
   @override
   void initState() {
@@ -827,24 +849,40 @@ class _ScanSheetState extends State<_ScanSheet> {
         ] else ...[
           Row(children: [
             Expanded(child: GestureDetector(
-              onTap: () => setState(() => _showManual = false),
+              onTap: () => setState(() { _showManual = false; _showGallery = false; }),
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 decoration: BoxDecoration(
-                  color: !_showManual ? t.primary : t.surface1,
+                  color: !_showManual && !_showGallery ? t.primary : t.surface1,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                      color: !_showManual ? t.primary : t.border),
+                      color: !_showManual && !_showGallery ? t.primary : t.border),
                 ),
                 child: Text(l10n.scanQrCode, textAlign: TextAlign.center,
                   style: TextStyle(fontFamily: 'PlusJakartaSans',
                       fontSize: 13, fontWeight: FontWeight.w700,
-                      color: !_showManual ? Colors.white : t.textMuted)),
+                      color: !_showManual && !_showGallery ? Colors.white : t.textMuted)),
               ),
             )),
             const SizedBox(width: 8),
             Expanded(child: GestureDetector(
-              onTap: () => setState(() => _showManual = true),
+              onTap: () => setState(() { _showManual = false; _showGallery = true; }),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  color: _showGallery ? t.primary : t.surface1,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: _showGallery ? t.primary : t.border),
+                ),
+                child: Text('From Gallery', textAlign: TextAlign.center,
+                  style: TextStyle(fontFamily: 'PlusJakartaSans',
+                      fontSize: 13, fontWeight: FontWeight.w700,
+                      color: _showGallery ? Colors.white : t.textMuted)),
+              ),
+            )),
+            const SizedBox(width: 8),
+            Expanded(child: GestureDetector(
+              onTap: () => setState(() { _showManual = true; _showGallery = false; }),
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 decoration: BoxDecoration(
@@ -862,7 +900,30 @@ class _ScanSheetState extends State<_ScanSheet> {
           ]),
           const SizedBox(height: 16),
 
-          if (!_showManual) ...[
+          if (_showGallery) ...[ 
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton.icon(
+                onPressed: _pickQrFromGallery,
+                icon: const Icon(Icons.photo_library_outlined),
+                label: const Text('Pick QR from Gallery',
+                  style: TextStyle(fontFamily: 'PlusJakartaSans',
+                      fontSize: 14, fontWeight: FontWeight.w700)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: t.primary, foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text('Select an image from your gallery that contains a QR code.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontFamily: 'PlusJakartaSans',
+                  fontSize: 12, color: t.textMuted)),
+          ] else if (!_showManual) ...[
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: SizedBox(

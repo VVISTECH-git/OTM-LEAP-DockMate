@@ -118,14 +118,18 @@ class _ShipmentGroupDetailScreenState
   }
 
   Future<void> _pickMultiGallery() async {
-    final status = await Permission.photos.request();
-    if (!status.isGranted) {
-      if (status.isPermanentlyDenied && mounted) {
-        _showPermissionDeniedDialog('Photo Library');
-      } else {
-        _showSnack('Photo library access denied', false);
+    // On Android, image_picker uses the system photo picker — no permission needed.
+    // Only request permission on iOS.
+    if (Platform.isIOS) {
+      final status = await Permission.photos.request();
+      if (!status.isGranted) {
+        if (status.isPermanentlyDenied && mounted) {
+          _showPermissionDeniedDialog('Photo Library');
+        } else {
+          _showSnack('Photo library access denied', false);
+        }
+        return;
       }
-      return;
     }
     try {
       final remaining = AppConstants.maxDocuments - _docs.length;

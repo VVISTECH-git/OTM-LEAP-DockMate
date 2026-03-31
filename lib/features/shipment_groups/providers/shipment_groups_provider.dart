@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import '../models/shipment_group_model.dart';
 import '../services/shipment_group_service.dart';
 import '../../../core/services/session_service.dart';
+import '../../../core/services/api_client.dart';
 
 enum LoadState { idle, loading, success, error }
 
@@ -61,7 +62,12 @@ class ShipmentGroupsProvider extends ChangeNotifier {
       if (kDebugMode) debugPrint('Provider: loaded ${_groups.length} groups ($_team)');
       _state = LoadState.success;
     } catch (e) {
-      if (kDebugMode) debugPrint('Provider error: $e');
+      if (kDebugMode) {
+        debugPrint('Provider error: $e');
+        if (e is ApiException) {
+          debugPrint('ApiException status: ${e.statusCode}, body: ${e.message}');
+        }
+      }
       _error = e.toString().replaceAll('Exception: ', '');
       _state = LoadState.error;
     }

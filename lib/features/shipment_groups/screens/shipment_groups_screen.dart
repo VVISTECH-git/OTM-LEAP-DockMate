@@ -95,31 +95,32 @@ class _ShipmentGroupsScreenState extends State<ShipmentGroupsScreen> {
                       width: 16, height: 1.5,
                       color: t.accent),
                 ]),
+                const SizedBox(height: 6),
+                // ── Badge moved here — part of branding, frees up right side ──
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: isIB
+                        ? const Color(0xFFE8F7F1)
+                        : const Color(0xFFFFF3E8),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    isIB ? AppLocalizations.of(context)!.inboundUpper
+                         : AppLocalizations.of(context)!.outboundUpper,
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      color: isIB
+                          ? AppConstants.inboundGreen
+                          : AppConstants.outboundOrange,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
 
-          // ── Badge ────────────────────────────────────────────────
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: isIB
-                  ? const Color(0xFFE8F7F1)
-                  : const Color(0xFFFFF3E8),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Text(
-              isIB ? AppLocalizations.of(context)!.inboundUpper
-                   : AppLocalizations.of(context)!.outboundUpper,
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-                color: isIB
-                    ? AppConstants.inboundGreen
-                    : AppConstants.outboundOrange,
-              ),
-            ),
-          ),
           // ── Switch button ─────────────────────────────────────────
           GestureDetector(
             onTap: () => _confirmSwitch(context, provider),

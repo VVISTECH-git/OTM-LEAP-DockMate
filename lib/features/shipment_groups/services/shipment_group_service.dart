@@ -20,7 +20,7 @@ class ShipmentGroupService {
         '?limit=$limit&offset=$offset'
         '&q=$query'
         '&expand=refnums,sourceLocation,destLocation'
-        '&fields=shipGroupXid,domainName,numberOfShipments,totalWeight,totalVolume,'
+        '&fields=shipGroupXid,numberOfShipments,totalWeight,totalVolume,'
         'attributeNumber1,attribute2,attribute5,attributeDate5,attributeDate6,refnums,'
         'sourceLocation.locationName,destLocation.locationName';
 
@@ -65,7 +65,7 @@ class ShipmentGroupService {
 
     if (kDebugMode) debugPrint('=== fetchById: $gid ===');
 
-    const fields = 'shipGroupXid,domainName,numberOfShipments,totalWeight,totalVolume,'
+    const fields = 'shipGroupXid,numberOfShipments,totalWeight,totalVolume,'
         'attributeNumber1,attribute2,attribute5,attributeDate5,attributeDate6,'
         'refnums,sourceLocation.locationName,destLocation.locationName';
 
